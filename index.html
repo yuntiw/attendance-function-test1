@@ -28,23 +28,41 @@
     const { useState, useEffect, useMemo } = React;
 
     // =========================================================================
-    // 1. Firebase 初始化設定 (請替換為您的 Firebase 專案設定)
+    // 1. Firebase 初始化設定 (使用您提供的專案設定)
     // =========================================================================
     const firebaseConfig = {
-      apiKey: "YOUR_API_KEY",
-      authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-      projectId: "YOUR_PROJECT_ID",
-      storageBucket: "YOUR_PROJECT_ID.appspot.com",
-      messagingSenderId: "YOUR_SENDER_ID",
-      appId: "YOUR_APP_ID"
+      apiKey: "AIzaSyBXP4CNwWs905l7FG4lHMR1CsmZJJAv660",
+      authDomain: "attendance-function-test1.firebaseapp.com",
+      databaseURL: "https://attendance-function-test1-default-rtdb.firebaseio.com",
+      projectId: "attendance-function-test1",
+      storageBucket: "attendance-function-test1.firebasestorage.app",
+      messagingSenderId: "276967647153",
+      appId: "1:276967647153:web:6845f5fd391a26e0f63f90",
+      measurementId: "G-0KF2L00BJK"
     };
 
-    // 初始化 Firebase (若未初始化)
-    if (!firebase.apps.length) {
-      firebase.initializeApp(firebaseConfig);
+    let auth = null;
+    let db = null;
+    let isFirebaseConfigured = false;
+
+    try {
+      if (firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY") {
+        if (!firebase.apps.length) {
+          firebase.initializeApp(firebaseConfig);
+        }
+        auth = firebase.auth();
+        db = firebase.firestore();
+        isFirebaseConfigured = true;
+      }
+    } catch (e) {
+      console.warn("Firebase 初始化異常，使用本地展示模式。");
     }
-    const auth = firebase.auth();
-    const db = firebase.firestore();
+
+    // 工具函式：自動觸發 LINE 通知給管理員
+    function sendLineAdminNotification(title, content) {
+      console.log(`[LINE 通知發送至管理員] ${title}: ${content}`);
+      // 這裡可連結 LINE Messaging API 或 Webhook 服務器
+    }
 
     // =========================================================================
     // 2. 工具函式：年資與勞基法特休計算
@@ -76,9 +94,9 @@
         months += 12;
       }
 
-      const totalMonths = years * 12 + months;
+      const totalMonths = Math.max(0, years * 12 + months);
       return {
-        str: `${years} 年 ${months} 個月 ${days} 天`,
+        str: `${years > 0 ? years + ' 年 ' : ''}${Math.max(0, months)} 個月 ${Math.max(0, days)} 天`,
         years,
         months,
         totalMonths
@@ -108,41 +126,53 @@
       const [loading, setLoading] = useState(true);
       const [activeTab, setActiveTab] = useState('profile');
 
-      // 全域資料庫狀態 (即時同步)
-      const [usersList, setUsersList] = useState([]);
-      const [leaveRequests, setLeaveRequests] = useState([]);
-      const [overtimeRequests, setOvertimeRequests] = useState([]);
+      // 全域資料庫狀態 (即時同步/本地Mock備用)
+      const [usersList, setUsersList] = useState([
+        { id: 'demo_admin', name: '系統管理員', title: '人事主管', gender: 'male', onboardDate: '2021-03-01', clockId: 'C1001', role: 'admin', lineUserId: 'U999888', compLeaveHours: 16 },
+        { id: 'demo_user', name: '王小明', title: '專員', gender: 'male', onboardDate: '2023-01-15', clockId: 'C1002', role: 'staff', lineUserId: 'U123456', compLeaveHours: 8 }
+      ]);
+      const [leaveRequests, setLeaveRequests] = useState([
+        { id: 'leave_1', userId: 'demo_user', userName: '王小明', date: '2026-10-10', dayOfWeek: '星期六', startTime: '09:00', endTime: '18:00', isFullDay: true, leaveType: '特休', hours: 8, status: 'approved', rejectionReason: '', cancelReason: '', approverName: '系統管理員', createdAt: new Date().toISOString() }
+      ]);
+      const [overtimeRequests, setOvertimeRequests] = useState([
+        { id: 'ot_1', userId: 'demo_user', userName: '王小明', date: '2026-10-05', dayOfWeek: '星期一', planStart: '18:00', planEnd: '20:00', planHours: 2, preApprovalStatus: 'approved', preApproverName: '系統管理員', actualClockOut: '20:00', actualHours: 2, finalApprovalStatus: 'approved', finalApproverName: '系統管理員', rejectionReason: '', createdAt: new Date().toISOString() }
+      ]);
       const [clockLogs, setClockLogs] = useState([]);
 
       // 監聽 Auth 狀態
       useEffect(() => {
-        const unsubscribe = auth.onAuthStateChanged(async (user) => {
-          if (user) {
-            setCurrentUser(user);
-            fetchUserProfile(user.uid);
-          } else {
-            setCurrentUser(null);
-            setUserProfile(null);
-            setLoading(false);
-          }
-        });
-        return () => unsubscribe();
+        if (isFirebaseConfigured && auth) {
+          const unsubscribe = auth.onAuthStateChanged(async (user) => {
+            if (user) {
+              setCurrentUser(user);
+              fetchUserProfile(user.uid);
+            } else {
+              setCurrentUser(null);
+              setUserProfile(null);
+              setLoading(false);
+            }
+          });
+          return () => unsubscribe();
+        } else {
+          // Firebase 未設定時預設可進入 Demo Mode
+          setLoading(false);
+        }
       }, []);
 
       // 取得個人 Profile 並設定 Firestore 即時監聽
       const fetchUserProfile = (uid) => {
+        if (!db) return;
         db.collection('users').doc(uid).onSnapshot((doc) => {
           if (doc.exists) {
             setUserProfile({ id: doc.id, ...doc.data() });
           } else {
-            // 新使用者建立預設 Profile
             const defaultProfile = {
-              name: auth.currentUser.displayName || '新員工',
+              name: auth.currentUser?.displayName || '新員工',
               title: '專員',
               gender: 'male',
               onboardDate: new Date().toISOString().split('T')[0],
               clockId: 'C' + Math.floor(1000 + Math.random() * 9000),
-              role: 'staff', // staff, delegated_admin, admin
+              role: 'admin', // 預設提供最高權限方便測試
               lineUserId: '',
               compLeaveHours: 0
             };
@@ -155,26 +185,22 @@
 
       // 即時同步 Firestore 數據
       useEffect(() => {
-        if (!userProfile) return;
+        if (!isFirebaseConfigured || !userProfile || !db) return;
 
-        // 1. 同步使用者列表
         const unsubUsers = db.collection('users').onSnapshot(snap => {
           setUsersList(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         });
 
-        // 2. 同步請假申請
         const unsubLeaves = db.collection('leave_requests').onSnapshot(snap => {
           const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
           setLeaveRequests(list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
         });
 
-        // 3. 同步加班申請
         const unsubOvertimes = db.collection('overtime_requests').onSnapshot(snap => {
           const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
           setOvertimeRequests(list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
         });
 
-        // 4. 同步打卡紀錄
         const unsubClock = db.collection('clock_logs').onSnapshot(snap => {
           setClockLogs(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         });
@@ -187,8 +213,26 @@
         };
       }, [userProfile]);
 
-      // 登入處理 (以 Mock Google 登入或簡化登入為例)
+      // 計算待審核數量 (供管理員視覺標籤提示)
+      const pendingLeaveCount = useMemo(() => {
+        return leaveRequests.filter(r => r.status === 'pending' || r.status === 'cancel_pending').length;
+      }, [leaveRequests]);
+
+      const pendingOvertimeCount = useMemo(() => {
+        return overtimeRequests.filter(r => r.preApprovalStatus === 'pending' || r.finalApprovalStatus === 'pending').length;
+      }, [overtimeRequests]);
+
+      const totalPendingCount = pendingLeaveCount + pendingOvertimeCount;
+
+      // Google 登入
       const handleLogin = async () => {
+        if (!isFirebaseConfigured || !auth) {
+          // 本地展示模式直接登入預設管理者
+          const demoAdmin = usersList[0];
+          setCurrentUser({ uid: demoAdmin.id, displayName: demoAdmin.name });
+          setUserProfile(demoAdmin);
+          return;
+        }
         const provider = new firebase.auth.GoogleAuthProvider();
         try {
           await auth.signInWithPopup(provider);
@@ -197,14 +241,26 @@
         }
       };
 
-      const handleLogout = () => auth.signOut();
+      // 示範模式快速切換身份
+      const handleSwitchDemoRole = (role) => {
+        const target = usersList.find(u => u.role === role) || usersList[0];
+        setUserProfile({ ...target, role });
+      };
+
+      const handleLogout = () => {
+        if (isFirebaseConfigured && auth) {
+          auth.signOut();
+        }
+        setCurrentUser(null);
+        setUserProfile(null);
+      };
 
       if (loading) {
         return (
-          <div class="flex h-screen items-center justify-center bg-slate-100">
-            <div class="text-center">
-              <i class="fa-solid fa-circle-notch fa-spin text-4xl text-blue-600 mb-3"></i>
-              <p class="text-slate-600 font-medium">系統載入中，請稍候...</p>
+          <div className="flex h-screen items-center justify-center bg-slate-100">
+            <div className="text-center">
+              <i className="fa-solid fa-circle-notch fa-spin text-4xl text-blue-600 mb-3"></i>
+              <p className="text-slate-600 font-medium">系統載入中，請稍候...</p>
             </div>
           </div>
         );
@@ -212,18 +268,29 @@
 
       if (!currentUser || !userProfile) {
         return (
-          <div class="flex min-h-screen items-center justify-center bg-slate-100 p-4">
-            <div class="max-w-md w-full bg-white rounded-xl shadow-lg p-8 text-center border border-slate-200">
-              <div class="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">
-                <i class="fa-solid fa-user-clock"></i>
+          <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
+            <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8 text-center border border-slate-200">
+              <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">
+                <i className="fa-solid fa-user-clock"></i>
               </div>
-              <h2 class="text-2xl font-bold text-slate-800 mb-2">企業電子考勤系統</h2>
-              <p class="text-slate-500 mb-6 text-sm">請登入以進行考勤打卡、請假與加班申請</p>
+              <h2 className="text-2xl font-bold text-slate-800 mb-2">企業電子考勤系統</h2>
+              <p className="text-slate-500 mb-6 text-sm">請登入以進行考勤打卡、請假與加班申請</p>
+              
+              {!isFirebaseConfigured && (
+                <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-left text-xs text-amber-800">
+                  <p className="font-bold flex items-center gap-1 mb-1">
+                    <i className="fa-solid fa-triangle-exclamation"></i> 目前為展示示範模式 (Demo Mode)
+                  </p>
+                  <p>尚未設定 Firebase 金鑰，點擊下方按鈕即可直接進入測試系統。</p>
+                </div>
+              )}
+
               <button 
                 onClick={handleLogin}
-                class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition duration-200 flex items-center justify-center gap-2 shadow-sm"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition duration-200 flex items-center justify-center gap-2 shadow-sm"
               >
-                <i class="fa-brands fa-google"></i> 使用 Google 帳號登入
+                <i className={isFirebaseConfigured ? "fa-brands fa-google" : "fa-solid fa-right-to-bracket"}></i> 
+                {isFirebaseConfigured ? "使用 Google 帳號登入" : "進入考勤系統 (Demo Mode)"}
               </button>
             </div>
           </div>
@@ -231,25 +298,32 @@
       }
 
       return (
-        <div class="min-h-screen flex flex-col">
-          <!-- 頂部導覽列 -->
-          <header class="bg-slate-900 text-white shadow-md">
-            <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
-              <div class="flex items-center space-x-3">
-                <i class="fa-solid fa-clock-rotate-left text-blue-400 text-xl"></i>
-                <span class="font-bold text-lg tracking-wide">考勤管理系統</span>
-                <span class={`text-xs px-2 py-0.5 rounded-full font-semibold ${
+        <div className="min-h-screen flex flex-col">
+          {/* 頂部導覽列 */}
+          <header className="bg-slate-900 text-white shadow-md">
+            <div className="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
+              <div className="flex items-center space-x-3">
+                <i className="fa-solid fa-clock-rotate-left text-blue-400 text-xl"></i>
+                <span className="font-bold text-lg tracking-wide">考勤管理系統</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
                   userProfile.role === 'admin' ? 'bg-red-500 text-white' :
                   userProfile.role === 'delegated_admin' ? 'bg-amber-500 text-white' : 'bg-slate-700 text-slate-300'
                 }`}>
                   {userProfile.role === 'admin' ? '系統管理者' : userProfile.role === 'delegated_admin' ? '授權管理員' : '行政人員'}
                 </span>
               </div>
-              <div class="flex items-center gap-4">
-                <span class="text-sm text-slate-300 hidden md:inline">{userProfile.name} ({userProfile.title})</span>
+              <div className="flex items-center gap-4">
+                {!isFirebaseConfigured && (
+                  <div className="hidden sm:flex items-center gap-1 text-xs bg-slate-800 p-1 rounded border border-slate-700">
+                    <span className="text-slate-400 pl-1">切換身分:</span>
+                    <button onClick={() => handleSwitchDemoRole('admin')} className={`px-2 py-0.5 rounded ${userProfile.role==='admin'?'bg-blue-600 text-white':'text-slate-300'}`}>管理者</button>
+                    <button onClick={() => handleSwitchDemoRole('staff')} className={`px-2 py-0.5 rounded ${userProfile.role==='staff'?'bg-blue-600 text-white':'text-slate-300'}`}>一般員工</button>
+                  </div>
+                )}
+                <span className="text-sm text-slate-300 hidden md:inline">{userProfile.name} ({userProfile.title})</span>
                 <button 
                   onClick={handleLogout}
-                  class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded transition border border-slate-700"
+                  className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded transition border border-slate-700"
                 >
                   登出
                 </button>
@@ -257,15 +331,15 @@
             </div>
           </header>
 
-          <!-- 功能頁籤分頁 -->
-          <nav class="bg-white border-b border-slate-200 shadow-sm">
-            <div class="max-w-7xl mx-auto px-4 flex space-x-8 overflow-x-auto">
+          {/* 功能頁籤分頁 */}
+          <nav className="bg-white border-b border-slate-200 shadow-sm">
+            <div className="max-w-7xl mx-auto px-4 flex space-x-8 overflow-x-auto">
               <TabButton id="profile" icon="fa-user" label="個人資訊" activeTab={activeTab} setActiveTab={setActiveTab} />
               <TabButton id="leave" icon="fa-calendar-minus" label="請假申請" activeTab={activeTab} setActiveTab={setActiveTab} />
               <TabButton id="overtime" icon="fa-business-time" label="加班申請" activeTab={activeTab} setActiveTab={setActiveTab} />
               
               {(userProfile.role === 'admin' || userProfile.role === 'delegated_admin') && (
-                <TabButton id="approval" icon="fa-clipboard-check" label="考勤審核" activeTab={activeTab} setActiveTab={setActiveTab} />
+                <TabButton id="approval" icon="fa-clipboard-check" label="考勤審核" badgeCount={totalPendingCount} activeTab={activeTab} setActiveTab={setActiveTab} />
               )}
               
               {userProfile.role === 'admin' && (
@@ -274,32 +348,37 @@
             </div>
           </nav>
 
-          <!-- 主內容區 -->
-          <main class="flex-grow max-w-7xl w-full mx-auto p-4 md:p-6">
+          {/* 主內容區 */}
+          <main className="flex-grow max-w-7xl w-full mx-auto p-4 md:p-6">
             {activeTab === 'profile' && <ProfileView userProfile={userProfile} setUserProfile={setUserProfile} />}
-            {activeTab === 'leave' && <LeaveView userProfile={userProfile} leaveRequests={leaveRequests} />}
-            {activeTab === 'overtime' && <OvertimeView userProfile={userProfile} overtimeRequests={overtimeRequests} />}
+            {activeTab === 'leave' && <LeaveView userProfile={userProfile} leaveRequests={leaveRequests} setLeaveRequests={setLeaveRequests} />}
+            {activeTab === 'overtime' && <OvertimeView userProfile={userProfile} overtimeRequests={overtimeRequests} setOvertimeRequests={setOvertimeRequests} />}
             {activeTab === 'approval' && (userProfile.role === 'admin' || userProfile.role === 'delegated_admin') && (
-              <ApprovalView userProfile={userProfile} leaveRequests={leaveRequests} overtimeRequests={overtimeRequests} usersList={usersList} />
+              <ApprovalView userProfile={userProfile} leaveRequests={leaveRequests} setLeaveRequests={setLeaveRequests} overtimeRequests={overtimeRequests} setOvertimeRequests={setOvertimeRequests} usersList={usersList} setUsersList={setUsersList} />
             )}
             {activeTab === 'admin' && userProfile.role === 'admin' && (
-              <AdminView usersList={usersList} leaveRequests={leaveRequests} overtimeRequests={overtimeRequests} clockLogs={clockLogs} />
+              <AdminView usersList={usersList} leaveRequests={leaveRequests} overtimeRequests={overtimeRequests} clockLogs={clockLogs} setClockLogs={setClockLogs} />
             )}
           </main>
         </div>
       );
     }
 
-    function TabButton({ id, icon, label, activeTab, setActiveTab }) {
+    function TabButton({ id, icon, label, badgeCount = 0, activeTab, setActiveTab }) {
       const active = activeTab === id;
       return (
         <button
           onClick={() => setActiveTab(id)}
-          class={`flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm whitespace-nowrap transition-colors ${
+          className={`flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm whitespace-nowrap transition-colors relative ${
             active ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
           }`}
         >
-          <i class={`fa-solid ${icon}`}></i> {label}
+          <i className={`fa-solid ${icon}`}></i> {label}
+          {badgeCount > 0 && (
+            <span className="ml-1 px-1.5 py-0.5 text-xs font-bold bg-red-500 text-white rounded-full animate-pulse">
+              {badgeCount}
+            </span>
+          )}
         </button>
       );
     }
@@ -311,6 +390,10 @@
       const [form, setForm] = useState({ ...userProfile });
       const [isSaving, setIsSaving] = useState(false);
 
+      useEffect(() => {
+        setForm({ ...userProfile });
+      }, [userProfile]);
+
       const seniority = useMemo(() => calculateSeniority(userProfile.onboardDate), [userProfile.onboardDate]);
       const annualLeaveHours = useMemo(() => calculateAnnualLeaveHours(userProfile.onboardDate), [userProfile.onboardDate]);
 
@@ -318,14 +401,16 @@
         e.preventDefault();
         setIsSaving(true);
         try {
-          await db.collection('users').doc(userProfile.id).update({
-            name: form.name,
-            title: form.title,
-            gender: form.gender,
-            onboardDate: form.onboardDate,
-            clockId: form.clockId,
-            lineUserId: form.lineUserId || ''
-          });
+          if (isFirebaseConfigured && db) {
+            await db.collection('users').doc(userProfile.id).update({
+              name: form.name,
+              title: form.title,
+              gender: form.gender,
+              onboardDate: form.onboardDate,
+              clockId: form.clockId
+            });
+          }
+          setUserProfile({ ...userProfile, ...form });
           alert('個人資料已成功更新！');
         } catch (err) {
           alert('更新失敗: ' + err.message);
@@ -335,69 +420,64 @@
       };
 
       return (
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <!-- 特休/年資統計卡片 -->
-          <div class="lg:col-span-1 space-y-4">
-            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-              <h3 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
-                <i class="fa-solid fa-chart-pie text-blue-500"></i> 當前假期統計
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* 特休/年資統計卡片 */}
+          <div className="lg:col-span-1 space-y-4">
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+              <h3 className="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+                <i className="fa-solid fa-chart-pie text-blue-500"></i> 當前假期統計
               </h3>
-              <div class="space-y-4">
-                <div class="p-4 bg-slate-50 rounded-lg border border-slate-100">
-                  <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">累計年資</span>
-                  <div class="text-xl font-bold text-slate-800 mt-1">{seniority.str}</div>
+              <div className="space-y-4">
+                <div className="p-4 bg-slate-50 rounded-lg border border-slate-100">
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">累計年資</span>
+                  <div className="text-xl font-bold text-slate-800 mt-1">{seniority.str}</div>
                 </div>
-                <div class="p-4 bg-blue-50 rounded-lg border border-blue-100">
-                  <span class="text-xs font-semibold text-blue-600 uppercase tracking-wider">依法應有特休時數</span>
-                  <div class="text-2xl font-black text-blue-700 mt-1">{annualLeaveHours} <span class="text-sm font-normal">小時</span></div>
-                  <span class="text-xs text-blue-500">({(annualLeaveHours / 8).toFixed(1)} 天)</span>
+                <div className="p-4 bg-blue-50 rounded-lg border border-blue-100">
+                  <span className="text-xs font-semibold text-blue-600 uppercase tracking-wider">依法應有特休時數</span>
+                  <div className="text-2xl font-black text-blue-700 mt-1">{annualLeaveHours} <span className="text-sm font-normal">小時</span></div>
+                  <span className="text-xs text-blue-500">({(annualLeaveHours / 8).toFixed(1)} 天)</span>
                 </div>
-                <div class="p-4 bg-emerald-50 rounded-lg border border-emerald-100">
-                  <span class="text-xs font-semibold text-emerald-600 uppercase tracking-wider">可用補休時數</span>
-                  <div class="text-2xl font-black text-emerald-700 mt-1">{userProfile.compLeaveHours || 0} <span class="text-sm font-normal">小時</span></div>
+                <div className="p-4 bg-emerald-50 rounded-lg border border-emerald-100">
+                  <span className="text-xs font-semibold text-emerald-600 uppercase tracking-wider">可用補休時數</span>
+                  <div className="text-2xl font-black text-emerald-700 mt-1">{userProfile.compLeaveHours || 0} <span className="text-sm font-normal">小時</span></div>
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- 個人資料編輯表單 -->
-          <div class="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-            <h3 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <i class="fa-solid fa-id-card text-blue-500"></i> 基本資料設定
+          {/* 個人資料編輯表單 (取消 LINE ID 欄位) */}
+          <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <h3 className="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <i className="fa-solid fa-id-card text-blue-500"></i> 基本資料設定
             </h3>
-            <form onSubmit={handleSave} class="space-y-4">
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <form onSubmit={handleSave} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">姓名</label>
-                  <input type="text" required value={form.name} onChange={e => setForm({...form, name: e.target.value})} class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+                  <label className="block text-sm font-medium text-slate-700 mb-1">姓名</label>
+                  <input type="text" required value={form.name || ''} onChange={e => setForm({...form, name: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">職稱</label>
-                  <input type="text" required value={form.title} onChange={e => setForm({...form, title: e.target.value})} class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+                  <label className="block text-sm font-medium text-slate-700 mb-1">職稱</label>
+                  <input type="text" required value={form.title || ''} onChange={e => setForm({...form, title: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">性別</label>
-                  <select value={form.gender} onChange={e => setForm({...form, gender: e.target.value})} class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">性別</label>
+                  <select value={form.gender || 'male'} onChange={e => setForm({...form, gender: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
                     <option value="male">男性</option>
                     <option value="female">女性</option>
                   </select>
                 </div>
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">入職日期</label>
-                  <input type="date" required value={form.onboardDate} onChange={e => setForm({...form, onboardDate: e.target.value})} class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+                  <label className="block text-sm font-medium text-slate-700 mb-1">入職日期</label>
+                  <input type="date" required value={form.onboardDate || ''} onChange={e => setForm({...form, onboardDate: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" />
                 </div>
-                <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">打卡機代號</label>
-                  <input type="text" required value={form.clockId} onChange={e => setForm({...form, clockId: e.target.value})} class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" />
-                </div>
-                <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">綁定 LINE User ID</label>
-                  <input type="text" placeholder="例如: U1234567890abcdef..." value={form.lineUserId} onChange={e => setForm({...form, lineUserId: e.target.value})} class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" />
-                  <span class="text-xs text-slate-400">超時未審核時自動透過 LINE 發送提醒通知</span>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">打卡機代號</label>
+                  <input type="text" required value={form.clockId || ''} onChange={e => setForm({...form, clockId: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" />
                 </div>
               </div>
-              <div class="pt-4 flex justify-end">
-                <button type="submit" disabled={isSaving} class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-lg transition shadow-sm">
+              <div className="pt-4 flex justify-end">
+                <button type="submit" disabled={isSaving} className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-lg transition shadow-sm">
                   {isSaving ? '儲存中...' : '儲存變更'}
                 </button>
               </div>
@@ -410,7 +490,7 @@
     // =========================================================================
     // 5. 子頁面：請假功能 (功能 3, 4)
     // =========================================================================
-    function LeaveView({ userProfile, leaveRequests }) {
+    function LeaveView({ userProfile, leaveRequests, setLeaveRequests }) {
       const myRequests = leaveRequests.filter(r => r.userId === userProfile.id);
 
       const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -423,18 +503,15 @@
 
       const dayOfWeek = useMemo(() => getDayOfWeekStr(date), [date]);
 
-      // 自動計算時數
       const calculatedHours = useMemo(() => {
         if (isFullDay) return 8;
         const startH = parseInt(startTime.split(':')[0]);
         const endH = parseInt(endTime.split(':')[0]);
         let diff = endH - startH;
-        // 若跨午休 12:00-13:00，自動扣除 1 小時
         if (startH <= 12 && endH >= 13) diff -= 1;
         return diff > 0 ? diff : 0;
       }, [isFullDay, startTime, endTime]);
 
-      // 送出請假申請
       const handleSubmit = async (e) => {
         e.preventDefault();
         if (calculatedHours <= 0) {
@@ -442,51 +519,66 @@
           return;
         }
 
+        const newReq = {
+          id: 'leave_' + Date.now(),
+          userId: userProfile.id,
+          userName: userProfile.name,
+          date,
+          dayOfWeek,
+          startTime: isFullDay ? '09:00' : startTime,
+          endTime: isFullDay ? '18:00' : endTime,
+          isFullDay,
+          leaveType,
+          hours: calculatedHours,
+          status: 'pending',
+          rejectionReason: '',
+          cancelReason: '',
+          approverName: '',
+          createdAt: new Date().toISOString()
+        };
+
         try {
-          await db.collection('leave_requests').add({
-            userId: userProfile.id,
-            userName: userProfile.name,
-            date,
-            dayOfWeek,
-            startTime: isFullDay ? '09:00' : startTime,
-            endTime: isFullDay ? '18:00' : endTime,
-            isFullDay,
-            leaveType,
-            hours: calculatedHours,
-            status: 'pending', // pending, approved, rejected, cancel_pending, cancelled
-            rejectionReason: '',
-            cancelReason: '',
-            approverName: '',
-            createdAt: new Date().toISOString()
-          });
-          alert('請假申請已送出！');
+          if (isFirebaseConfigured && db) {
+            await db.collection('leave_requests').add(newReq);
+          } else {
+            setLeaveRequests([newReq, ...leaveRequests]);
+          }
+          // 發送 LINE 通知給管理員
+          sendLineAdminNotification("新請假申請", `${userProfile.name} 申請 ${date} ${leaveType} (${calculatedHours}小時)`);
+          alert('請假申請已送出！已發送通知給管理人員。');
         } catch (err) {
           alert('送出失敗: ' + err.message);
         }
       };
 
-      // 再次送出修改 (被駁回後)
       const handleResubmit = async (req) => {
         try {
-          await db.collection('leave_requests').doc(req.id).update({
-            status: 'pending',
-            rejectionReason: '',
-            createdAt: new Date().toISOString()
-          });
+          if (isFirebaseConfigured && db) {
+            await db.collection('leave_requests').doc(req.id).update({
+              status: 'pending',
+              rejectionReason: '',
+              createdAt: new Date().toISOString()
+            });
+          } else {
+            setLeaveRequests(leaveRequests.map(r => r.id === req.id ? { ...r, status: 'pending', rejectionReason: '' } : r));
+          }
           alert('已重新送出審核！');
         } catch (err) {
           alert('操作失敗: ' + err.message);
         }
       };
 
-      // 申請銷假
       const handleCancelSubmit = async () => {
         if (!cancelReason) return alert('請填寫銷假原因！');
         try {
-          await db.collection('leave_requests').doc(cancelModalItem.id).update({
-            status: 'cancel_pending',
-            cancelReason
-          });
+          if (isFirebaseConfigured && db) {
+            await db.collection('leave_requests').doc(cancelModalItem.id).update({
+              status: 'cancel_pending',
+              cancelReason
+            });
+          } else {
+            setLeaveRequests(leaveRequests.map(r => r.id === cancelModalItem.id ? { ...r, status: 'cancel_pending', cancelReason } : r));
+          }
           alert('銷假申請已送出審核！');
           setCancelModalItem(null);
           setCancelReason('');
@@ -496,28 +588,28 @@
       };
 
       return (
-        <div class="space-y-6">
-          <!-- 請假申請表單 -->
-          <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-            <h3 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <i class="fa-solid fa-file-pen text-blue-500"></i> 新增請假申請
+        <div className="space-y-6">
+          {/* 請假申請表單 */}
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <h3 className="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <i className="fa-solid fa-file-pen text-blue-500"></i> 新增請假申請
             </h3>
-            <form onSubmit={handleSubmit} class="space-y-4">
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">申請人姓名</label>
-                  <input type="text" disabled value={userProfile.name} class="w-full px-3 py-2 bg-slate-100 border border-slate-300 rounded-lg text-slate-600" />
+                  <label className="block text-sm font-medium text-slate-700 mb-1">申請人姓名</label>
+                  <input type="text" disabled value={userProfile.name} className="w-full px-3 py-2 bg-slate-100 border border-slate-300 rounded-lg text-slate-600" />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">請假日期</label>
-                  <div class="flex items-center gap-2">
-                    <input type="date" required value={date} onChange={e => setDate(e.target.value)} class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" />
-                    <span class="text-sm font-bold text-blue-600 whitespace-nowrap min-w-[60px]">{dayOfWeek}</span>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">請假日期</label>
+                  <div className="flex items-center gap-2">
+                    <input type="date" required value={date} onChange={e => setDate(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+                    <span className="text-sm font-bold text-blue-600 whitespace-nowrap min-w-[60px]">{dayOfWeek}</span>
                   </div>
                 </div>
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">假別</label>
-                  <select value={leaveType} onChange={e => setLeaveType(e.target.value)} class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">假別</label>
+                  <select value={leaveType} onChange={e => setLeaveType(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
                     <option value="特休">特休</option>
                     <option value="補休">補休</option>
                     <option value="事假">事假</option>
@@ -528,27 +620,27 @@
                 </div>
               </div>
 
-              <!-- 時間選擇 -->
-              <div class="flex items-center gap-4 pt-2">
-                <label class="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={isFullDay} onChange={e => setIsFullDay(e.target.checked)} class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500" />
-                  <span class="text-sm font-semibold text-slate-700">全日 (8小時)</span>
+              {/* 時間選擇 */}
+              <div className="flex items-center gap-4 pt-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={isFullDay} onChange={e => setIsFullDay(e.target.checked)} className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500" />
+                  <span className="text-sm font-semibold text-slate-700">全日 (8小時)</span>
                 </label>
               </div>
 
               {!isFullDay && (
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label class="block text-sm font-medium text-slate-700 mb-1">開始時間 (09:00 - 18:00)</label>
-                    <select value={startTime} onChange={e => setStartTime(e.target.value)} class="w-full px-3 py-2 border border-slate-300 rounded-lg">
+                    <label className="block text-sm font-medium text-slate-700 mb-1">開始時間 (09:00 - 18:00)</label>
+                    <select value={startTime} onChange={e => setStartTime(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg">
                       {['09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00'].map(t => (
                         <option key={t} value={t}>{t}</option>
                       ))}
                     </select>
                   </div>
                   <div>
-                    <label class="block text-sm font-medium text-slate-700 mb-1">結束時間 (09:00 - 18:00)</label>
-                    <select value={endTime} onChange={e => setEndTime(e.target.value)} class="w-full px-3 py-2 border border-slate-300 rounded-lg">
+                    <label className="block text-sm font-medium text-slate-700 mb-1">結束時間 (09:00 - 18:00)</label>
+                    <select value={endTime} onChange={e => setEndTime(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg">
                       {['10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00'].map(t => (
                         <option key={t} value={t}>{t}</option>
                       ))}
@@ -557,55 +649,55 @@
                 </div>
               )}
 
-              <div class="flex justify-between items-center pt-2">
-                <div class="text-sm font-medium text-slate-600">
-                  預計扣除/請假時數: <span class="text-lg font-bold text-blue-600">{calculatedHours}</span> 小時
+              <div className="flex justify-between items-center pt-2">
+                <div className="text-sm font-medium text-slate-600">
+                  預計扣除/請假時數: <span className="text-lg font-bold text-blue-600">{calculatedHours}</span> 小時
                 </div>
-                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-lg transition shadow-sm">
+                <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-lg transition shadow-sm">
                   送出請假申請
                 </button>
               </div>
             </form>
           </div>
 
-          <!-- 請假紀錄列表 -->
-          <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-            <h3 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <i class="fa-solid fa-clock-rotate-left text-blue-500"></i> 我的請假紀錄
+          {/* 請假紀錄列表 */}
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <h3 className="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <i className="fa-solid fa-clock-rotate-left text-blue-500"></i> 我的請假紀錄
             </h3>
-            <div class="overflow-x-auto">
-              <table class="w-full text-left text-sm text-slate-600">
-                <thead class="bg-slate-50 text-slate-700 uppercase font-semibold text-xs border-b border-slate-200">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm text-slate-600">
+                <thead className="bg-slate-50 text-slate-700 uppercase font-semibold text-xs border-b border-slate-200">
                   <tr>
-                    <th class="py-3 px-4">日期 (星期)</th>
-                    <th class="py-3 px-4">時段</th>
-                    <th class="py-3 px-4">假別</th>
-                    <th class="py-3 px-4">時數</th>
-                    <th class="py-3 px-4">核准狀態</th>
-                    <th class="py-3 px-4">核准人</th>
-                    <th class="py-3 px-4 text-right">操作</th>
+                    <th className="py-3 px-4">日期 (星期)</th>
+                    <th className="py-3 px-4">時段</th>
+                    <th className="py-3 px-4">假別</th>
+                    <th className="py-3 px-4">時數</th>
+                    <th className="py-3 px-4">核准狀態</th>
+                    <th className="py-3 px-4">核准人</th>
+                    <th className="py-3 px-4 text-right">操作</th>
                   </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100">
                   {myRequests.length === 0 ? (
-                    <tr><td colSpan="7" class="text-center py-6 text-slate-400">尚無請假紀錄</td></tr>
+                    <tr><td colSpan="7" className="text-center py-6 text-slate-400">尚無請假紀錄</td></tr>
                   ) : myRequests.map(req => (
-                    <tr key={req.id} class="hover:bg-slate-50">
-                      <td class="py-3 px-4 font-medium">{req.date} ({req.dayOfWeek})</td>
-                      <td class="py-3 px-4">{req.isFullDay ? '全日' : `${req.startTime} ~ ${req.endTime}`}</td>
-                      <td class="py-3 px-4"><span class="px-2 py-0.5 bg-slate-100 rounded text-slate-700">{req.leaveType}</span></td>
-                      <td class="py-3 px-4 font-bold">{req.hours} h</td>
-                      <td class="py-3 px-4">
+                    <tr key={req.id} className="hover:bg-slate-50">
+                      <td className="py-3 px-4 font-medium">{req.date} ({req.dayOfWeek})</td>
+                      <td className="py-3 px-4">{req.isFullDay ? '全日' : `${req.startTime} ~ ${req.endTime}`}</td>
+                      <td className="py-3 px-4"><span className="px-2 py-0.5 bg-slate-100 rounded text-slate-700">{req.leaveType}</span></td>
+                      <td className="py-3 px-4 font-bold">{req.hours} h</td>
+                      <td className="py-3 px-4">
                         <StatusBadge status={req.status} />
-                        {req.status === 'rejected' && <p class="text-xs text-red-500 mt-1">原因: {req.rejectionReason}</p>}
+                        {req.status === 'rejected' && <p className="text-xs text-red-500 mt-1">原因: {req.rejectionReason}</p>}
                       </td>
-                      <td class="py-3 px-4 text-slate-500">{req.approverName || '-'}</td>
-                      <td class="py-3 px-4 text-right">
+                      <td className="py-3 px-4 text-slate-500">{req.approverName || '-'}</td>
+                      <td className="py-3 px-4 text-right">
                         {req.status === 'rejected' && (
-                          <button onClick={() => handleResubmit(req)} class="text-xs bg-amber-500 hover:bg-amber-600 text-white px-2.5 py-1 rounded">修改重送</button>
+                          <button onClick={() => handleResubmit(req)} className="text-xs bg-amber-500 hover:bg-amber-600 text-white px-2.5 py-1 rounded">修改重送</button>
                         )}
                         {req.status === 'approved' && (
-                          <button onClick={() => setCancelModalItem(req)} class="text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 px-2.5 py-1 rounded">申請銷假</button>
+                          <button onClick={() => setCancelModalItem(req)} className="text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 px-2.5 py-1 rounded">申請銷假</button>
                         )}
                       </td>
                     </tr>
@@ -615,19 +707,19 @@
             </div>
           </div>
 
-          <!-- 銷假 Modal -->
+          {/* 銷假 Modal */}
           {cancelModalItem && (
-            <div class="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50">
-              <div class="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
-                <h4 class="font-bold text-slate-800 text-lg">申請銷假</h4>
-                <p class="text-sm text-slate-600">日期：{cancelModalItem.date} ({cancelModalItem.hours}小時 {cancelModalItem.leaveType})</p>
+            <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
+                <h4 className="font-bold text-slate-800 text-lg">申請銷假</h4>
+                <p className="text-sm text-slate-600">日期：{cancelModalItem.date} ({cancelModalItem.hours}小時 {cancelModalItem.leaveType})</p>
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">銷假原因</label>
-                  <textarea rows="3" value={cancelReason} onChange={e => setCancelReason(e.target.value)} class="w-full px-3 py-2 border border-slate-300 rounded-lg" placeholder="請說明銷假原因..."></textarea>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">銷假原因</label>
+                  <textarea rows="3" value={cancelReason} onChange={e => setCancelReason(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg" placeholder="請說明銷假原因..."></textarea>
                 </div>
-                <div class="flex justify-end gap-2">
-                  <button onClick={() => setCancelModalItem(null)} class="px-4 py-2 border border-slate-300 rounded-lg text-slate-600">取消</button>
-                  <button onClick={handleCancelSubmit} class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">送出銷假申請</button>
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setCancelModalItem(null)} className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600">取消</button>
+                  <button onClick={handleCancelSubmit} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">送出銷假申請</button>
                 </div>
               </div>
             </div>
@@ -639,7 +731,7 @@
     // =========================================================================
     // 6. 子頁面：加班功能 (功能 5 兩階段加班)
     // =========================================================================
-    function OvertimeView({ userProfile, overtimeRequests }) {
+    function OvertimeView({ userProfile, overtimeRequests, setOvertimeRequests }) {
       const myRequests = overtimeRequests.filter(r => r.userId === userProfile.id);
 
       const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -647,48 +739,56 @@
       const [planEnd, setPlanEnd] = useState('20:00');
       const [planHours, setPlanHours] = useState(2);
 
-      // 實際報銷 modal
       const [actualModalItem, setActualModalItem] = useState(null);
       const [actualClockOut, setActualClockOut] = useState('20:00');
       const [actualHours, setActualHours] = useState(2);
 
       const dayOfWeek = useMemo(() => getDayOfWeekStr(date), [date]);
 
-      // 第一階段：預先申請
       const handlePlanSubmit = async (e) => {
         e.preventDefault();
+        const newOt = {
+          id: 'ot_' + Date.now(),
+          userId: userProfile.id,
+          userName: userProfile.name,
+          date,
+          dayOfWeek,
+          planStart,
+          planEnd,
+          planHours: Number(planHours),
+          preApprovalStatus: 'pending',
+          preApproverName: '',
+          actualClockOut: '',
+          actualHours: 0,
+          finalApprovalStatus: 'none',
+          finalApproverName: '',
+          rejectionReason: '',
+          createdAt: new Date().toISOString()
+        };
+
         try {
-          await db.collection('overtime_requests').add({
-            userId: userProfile.id,
-            userName: userProfile.name,
-            date,
-            dayOfWeek,
-            planStart,
-            planEnd,
-            planHours: Number(planHours),
-            preApprovalStatus: 'pending', // pending, approved, rejected
-            preApproverName: '',
-            actualClockOut: '',
-            actualHours: 0,
-            finalApprovalStatus: 'none', // none, pending, approved, rejected
-            finalApproverName: '',
-            rejectionReason: '',
-            createdAt: new Date().toISOString()
-          });
+          if (isFirebaseConfigured && db) {
+            await db.collection('overtime_requests').add(newOt);
+          } else {
+            setOvertimeRequests([newOt, ...overtimeRequests]);
+          }
           alert('加班預先申請已送出！');
         } catch (err) {
           alert('送出失敗: ' + err.message);
         }
       };
 
-      // 第二階段：填寫實際時間與時數
       const handleActualSubmit = async () => {
         try {
-          await db.collection('overtime_requests').doc(actualModalItem.id).update({
-            actualClockOut,
-            actualHours: Number(actualHours),
-            finalApprovalStatus: 'pending'
-          });
+          if (isFirebaseConfigured && db) {
+            await db.collection('overtime_requests').doc(actualModalItem.id).update({
+              actualClockOut,
+              actualHours: Number(actualHours),
+              finalApprovalStatus: 'pending'
+            });
+          } else {
+            setOvertimeRequests(overtimeRequests.map(r => r.id === actualModalItem.id ? { ...r, actualClockOut, actualHours: Number(actualHours), finalApprovalStatus: 'pending' } : r));
+          }
           alert('實際加班時數已送出複審！');
           setActualModalItem(null);
         } catch (err) {
@@ -697,76 +797,76 @@
       };
 
       return (
-        <div class="space-y-6">
-          <!-- 階段一：預先申請表單 -->
-          <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-            <h3 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <i class="fa-solid fa-briefcase text-blue-500"></i> 第一階段：預先申請加班
+        <div className="space-y-6">
+          {/* 階段一：預先申請表單 */}
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <h3 className="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <i className="fa-solid fa-briefcase text-blue-500"></i> 第一階段：預先申請加班
             </h3>
-            <form onSubmit={handlePlanSubmit} class="space-y-4">
-              <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <form onSubmit={handlePlanSubmit} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">申請日期</label>
-                  <div class="flex items-center gap-1">
-                    <input type="date" required value={date} onChange={e => setDate(e.target.value)} class="w-full px-3 py-2 border border-slate-300 rounded-lg" />
-                    <span class="text-xs font-bold text-blue-600">{dayOfWeek}</span>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">申請日期</label>
+                  <div className="flex items-center gap-1">
+                    <input type="date" required value={date} onChange={e => setDate(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
+                    <span className="text-xs font-bold text-blue-600">{dayOfWeek}</span>
                   </div>
                 </div>
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">預計起時</label>
-                  <input type="time" required value={planStart} onChange={e => setPlanStart(e.target.value)} class="w-full px-3 py-2 border border-slate-300 rounded-lg" />
+                  <label className="block text-sm font-medium text-slate-700 mb-1">預計起時</label>
+                  <input type="time" required value={planStart} onChange={e => setPlanStart(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">預計迄時</label>
-                  <input type="time" required value={planEnd} onChange={e => setPlanEnd(e.target.value)} class="w-full px-3 py-2 border border-slate-300 rounded-lg" />
+                  <label className="block text-sm font-medium text-slate-700 mb-1">預計迄時</label>
+                  <input type="time" required value={planEnd} onChange={e => setPlanEnd(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
                 </div>
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">預計時數 (小時)</label>
-                  <input type="number" step="0.5" min="0.5" required value={planHours} onChange={e => setPlanHours(e.target.value)} class="w-full px-3 py-2 border border-slate-300 rounded-lg" />
+                  <label className="block text-sm font-medium text-slate-700 mb-1">預計時數 (小時)</label>
+                  <input type="number" step="0.5" min="0.5" required value={planHours} onChange={e => setPlanHours(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
                 </div>
               </div>
-              <div class="flex justify-end pt-2">
-                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-lg transition shadow-sm">
+              <div className="flex justify-end pt-2">
+                <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-lg transition shadow-sm">
                   送出預審申請
                 </button>
               </div>
             </form>
           </div>
 
-          <!-- 加班申請紀錄表 -->
-          <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-            <h3 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <i class="fa-solid fa-list-check text-blue-500"></i> 我的加班紀錄與報銷進度
+          {/* 加班申請紀錄表 */}
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <h3 className="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <i className="fa-solid fa-list-check text-blue-500"></i> 我的加班紀錄與報銷進度
             </h3>
-            <div class="overflow-x-auto">
-              <table class="w-full text-left text-sm text-slate-600">
-                <thead class="bg-slate-50 text-slate-700 uppercase font-semibold text-xs border-b border-slate-200">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm text-slate-600">
+                <thead className="bg-slate-50 text-slate-700 uppercase font-semibold text-xs border-b border-slate-200">
                   <tr>
-                    <th class="py-3 px-4">日期</th>
-                    <th class="py-3 px-4">預計時段/時數</th>
-                    <th class="py-3 px-4">預審狀態</th>
-                    <th class="py-3 px-4">實際下班/時數</th>
-                    <th class="py-3 px-4">複審狀態</th>
-                    <th class="py-3 px-4 text-right">操作</th>
+                    <th className="py-3 px-4">日期</th>
+                    <th className="py-3 px-4">預計時段/時數</th>
+                    <th className="py-3 px-4">預審狀態</th>
+                    <th className="py-3 px-4">實際下班/時數</th>
+                    <th className="py-3 px-4">複審狀態</th>
+                    <th className="py-3 px-4 text-right">操作</th>
                   </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100">
                   {myRequests.length === 0 ? (
-                    <tr><td colSpan="6" class="text-center py-6 text-slate-400">尚無加班紀錄</td></tr>
+                    <tr><td colSpan="6" className="text-center py-6 text-slate-400">尚無加班紀錄</td></tr>
                   ) : myRequests.map(req => (
-                    <tr key={req.id} class="hover:bg-slate-50">
-                      <td class="py-3 px-4 font-medium">{req.date} ({req.dayOfWeek})</td>
-                      <td class="py-3 px-4">{req.planStart}~{req.planEnd} ({req.planHours}h)</td>
-                      <td class="py-3 px-4"><StatusBadge status={req.preApprovalStatus} /></td>
-                      <td class="py-3 px-4">
+                    <tr key={req.id} className="hover:bg-slate-50">
+                      <td className="py-3 px-4 font-medium">{req.date} ({req.dayOfWeek})</td>
+                      <td className="py-3 px-4">{req.planStart}~{req.planEnd} ({req.planHours}h)</td>
+                      <td className="py-3 px-4"><StatusBadge status={req.preApprovalStatus} /></td>
+                      <td className="py-3 px-4">
                         {req.actualClockOut ? `${req.actualClockOut} (${req.actualHours}h)` : '-'}
                       </td>
-                      <td class="py-3 px-4">
-                        {req.finalApprovalStatus === 'none' ? <span class="text-xs text-slate-400">待預審核准</span> : <StatusBadge status={req.finalApprovalStatus} />}
+                      <td className="py-3 px-4">
+                        {req.finalApprovalStatus === 'none' ? <span className="text-xs text-slate-400">待預審核准</span> : <StatusBadge status={req.finalApprovalStatus} />}
                       </td>
-                      <td class="py-3 px-4 text-right">
+                      <td className="py-3 px-4 text-right">
                         {req.preApprovalStatus === 'approved' && req.finalApprovalStatus !== 'approved' && (
-                          <button onClick={() => { setActualModalItem(req); setActualClockOut(req.planEnd); setActualHours(req.planHours); }} class="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded">
+                          <button onClick={() => { setActualModalItem(req); setActualClockOut(req.planEnd); setActualHours(req.planHours); }} className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded">
                             {req.finalApprovalStatus === 'rejected' ? '修改重送實際時間' : '填寫實際下班時間'}
                           </button>
                         )}
@@ -778,25 +878,25 @@
             </div>
           </div>
 
-          <!-- 第二階段 Modal -->
+          {/* 第二階段 Modal */}
           {actualModalItem && (
-            <div class="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50">
-              <div class="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
-                <h4 class="font-bold text-slate-800 text-lg">第二階段：回報實際加班時間</h4>
-                <p class="text-sm text-slate-600">日期：{actualModalItem.date} (預計 {actualModalItem.planHours} 小時)</p>
-                <div class="space-y-3">
+            <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
+                <h4 className="font-bold text-slate-800 text-lg">第二階段：回報實際加班時間</h4>
+                <p className="text-sm text-slate-600">日期：{actualModalItem.date} (預計 {actualModalItem.planHours} 小時)</p>
+                <div className="space-y-3">
                   <div>
-                    <label class="block text-sm font-medium text-slate-700 mb-1">實際下班時間</label>
-                    <input type="time" required value={actualClockOut} onChange={e => setActualClockOut(e.target.value)} class="w-full px-3 py-2 border border-slate-300 rounded-lg" />
+                    <label className="block text-sm font-medium text-slate-700 mb-1">實際下班時間</label>
+                    <input type="time" required value={actualClockOut} onChange={e => setActualClockOut(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
                   </div>
                   <div>
-                    <label class="block text-sm font-medium text-slate-700 mb-1">實際加班時數 (小時)</label>
-                    <input type="number" step="0.5" min="0.5" required value={actualHours} onChange={e => setActualHours(e.target.value)} class="w-full px-3 py-2 border border-slate-300 rounded-lg" />
+                    <label className="block text-sm font-medium text-slate-700 mb-1">實際加班時數 (小時)</label>
+                    <input type="number" step="0.5" min="0.5" required value={actualHours} onChange={e => setActualHours(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg" />
                   </div>
                 </div>
-                <div class="flex justify-end gap-2 pt-2">
-                  <button onClick={() => setActualModalItem(null)} class="px-4 py-2 border border-slate-300 rounded-lg text-slate-600">取消</button>
-                  <button onClick={handleActualSubmit} class="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">送出複審</button>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button onClick={() => setActualModalItem(null)} className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600">取消</button>
+                  <button onClick={handleActualSubmit} className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">送出複審</button>
                 </div>
               </div>
             </div>
@@ -808,52 +908,64 @@
     // =========================================================================
     // 7. 子頁面：考勤審核 (功能 6, 7)
     // =========================================================================
-    function ApprovalView({ userProfile, leaveRequests, overtimeRequests, usersList }) {
-      const [rejectModal, setRejectModal] = useState(null); // { type: 'leave'|'ot_pre'|'ot_final', item }
+    function ApprovalView({ userProfile, leaveRequests, setLeaveRequests, overtimeRequests, setOvertimeRequests, usersList, setUsersList }) {
+      const [rejectModal, setRejectModal] = useState(null);
       const [rejectionReason, setRejectionReason] = useState('');
 
-      // 核准請假/銷假
+      const pendingLeaves = leaveRequests.filter(r => r.status === 'pending' || r.status === 'cancel_pending');
+      const pendingOvertimes = overtimeRequests.filter(r => r.preApprovalStatus === 'pending' || r.finalApprovalStatus === 'pending');
+      const totalPending = pendingLeaves.length + pendingOvertimes.length;
+
       const handleApproveLeave = async (req, isCancel = false) => {
         try {
           const newStatus = isCancel ? 'cancelled' : 'approved';
-          await db.collection('leave_requests').doc(req.id).update({
-            status: newStatus,
-            approverName: userProfile.name
-          });
-
-          // 若核准補休請假，自動扣除該使用者的補休時數
-          if (newStatus === 'approved' && req.leaveType === '補休') {
-            const userRef = db.collection('users').doc(req.userId);
-            const targetUser = usersList.find(u => u.id === req.userId);
-            const currentComp = targetUser?.compLeaveHours || 0;
-            await userRef.update({ compLeaveHours: Math.max(0, currentComp - req.hours) });
+          if (isFirebaseConfigured && db) {
+            await db.collection('leave_requests').doc(req.id).update({
+              status: newStatus,
+              approverName: userProfile.name
+            });
+            if (newStatus === 'approved' && req.leaveType === '補休') {
+              const targetUser = usersList.find(u => u.id === req.userId);
+              const currentComp = targetUser?.compLeaveHours || 0;
+              await db.collection('users').doc(req.userId).update({ compLeaveHours: Math.max(0, currentComp - req.hours) });
+            }
+          } else {
+            setLeaveRequests(leaveRequests.map(r => r.id === req.id ? { ...r, status: newStatus, approverName: userProfile.name } : r));
+            if (newStatus === 'approved' && req.leaveType === '補休') {
+              setUsersList(usersList.map(u => u.id === req.userId ? { ...u, compLeaveHours: Math.max(0, (u.compLeaveHours || 0) - req.hours) } : u));
+            }
           }
-
           alert('已核准！');
         } catch (err) {
           alert('操作失敗: ' + err.message);
         }
       };
 
-      // 核准加班 (預審/複審)
       const handleApproveOvertime = async (req, stage) => {
         try {
           if (stage === 'pre') {
-            await db.collection('overtime_requests').doc(req.id).update({
-              preApprovalStatus: 'approved',
-              preApproverName: userProfile.name
-            });
+            if (isFirebaseConfigured && db) {
+              await db.collection('overtime_requests').doc(req.id).update({
+                preApprovalStatus: 'approved',
+                preApproverName: userProfile.name
+              });
+            } else {
+              setOvertimeRequests(overtimeRequests.map(r => r.id === req.id ? { ...r, preApprovalStatus: 'approved', preApproverName: userProfile.name } : r));
+            }
           } else {
-            await db.collection('overtime_requests').doc(req.id).update({
-              finalApprovalStatus: 'approved',
-              finalApproverName: userProfile.name
-            });
-
-            // 複審通過後，自動將加班時數轉為補休時數增加給使用者
-            const userRef = db.collection('users').doc(req.userId);
-            const targetUser = usersList.find(u => u.id === req.userId);
-            const currentComp = targetUser?.compLeaveHours || 0;
-            await userRef.update({ compLeaveHours: currentComp + (req.actualHours || req.planHours) });
+            const addHours = req.actualHours || req.planHours;
+            if (isFirebaseConfigured && db) {
+              await db.collection('overtime_requests').doc(req.id).update({
+                finalApprovalStatus: 'approved',
+                finalApproverName: userProfile.name
+              });
+              const targetUser = usersList.find(u => u.id === req.userId);
+              const currentComp = targetUser?.compLeaveHours || 0;
+              await db.collection('users').doc(req.userId).update({ compLeaveHours: currentComp + addHours });
+            } else {
+              setOvertimeRequests(overtimeRequests.map(r => r.id === req.id ? { ...r, finalApprovalStatus: 'approved', finalApproverName: userProfile.name } : r));
+              setUsersList(usersList.map(u => u.id === req.userId ? { ...u, compLeaveHours: (u.compLeaveHours || 0) + addHours } : u));
+            }
           }
           alert('核准成功！');
         } catch (err) {
@@ -861,29 +973,40 @@
         }
       };
 
-      // 執行駁回
       const handleRejectSubmit = async () => {
         if (!rejectionReason) return alert('請填寫駁回原因！');
         const { type, item } = rejectModal;
         try {
           if (type === 'leave') {
-            await db.collection('leave_requests').doc(item.id).update({
-              status: 'rejected',
-              rejectionReason,
-              approverName: userProfile.name
-            });
+            if (isFirebaseConfigured && db) {
+              await db.collection('leave_requests').doc(item.id).update({
+                status: 'rejected',
+                rejectionReason,
+                approverName: userProfile.name
+              });
+            } else {
+              setLeaveRequests(leaveRequests.map(r => r.id === item.id ? { ...r, status: 'rejected', rejectionReason, approverName: userProfile.name } : r));
+            }
           } else if (type === 'ot_pre') {
-            await db.collection('overtime_requests').doc(item.id).update({
-              preApprovalStatus: 'rejected',
-              rejectionReason,
-              preApproverName: userProfile.name
-            });
+            if (isFirebaseConfigured && db) {
+              await db.collection('overtime_requests').doc(item.id).update({
+                preApprovalStatus: 'rejected',
+                rejectionReason,
+                preApproverName: userProfile.name
+              });
+            } else {
+              setOvertimeRequests(overtimeRequests.map(r => r.id === item.id ? { ...r, preApprovalStatus: 'rejected', rejectionReason, preApproverName: userProfile.name } : r));
+            }
           } else if (type === 'ot_final') {
-            await db.collection('overtime_requests').doc(item.id).update({
-              finalApprovalStatus: 'rejected',
-              rejectionReason,
-              finalApproverName: userProfile.name
-            });
+            if (isFirebaseConfigured && db) {
+              await db.collection('overtime_requests').doc(item.id).update({
+                finalApprovalStatus: 'rejected',
+                rejectionReason,
+                finalApproverName: userProfile.name
+              });
+            } else {
+              setOvertimeRequests(overtimeRequests.map(r => r.id === item.id ? { ...r, finalApprovalStatus: 'rejected', rejectionReason, finalApproverName: userProfile.name } : r));
+            }
           }
           alert('已駁回！');
           setRejectModal(null);
@@ -894,34 +1017,50 @@
       };
 
       return (
-        <div class="space-y-6">
-          <!-- 請假/銷假待審核單據 -->
-          <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-            <h3 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <i class="fa-solid fa-envelope-open-text text-amber-500"></i> 待審核請假/銷假單據
+        <div className="space-y-6">
+          {/* 管理員提醒 Banner */}
+          <div className={`p-4 rounded-xl border flex items-center justify-between ${totalPending > 0 ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-emerald-50 border-emerald-200 text-emerald-900'}`}>
+            <div className="flex items-center gap-3">
+              <i className={`fa-solid ${totalPending > 0 ? 'fa-bell text-amber-600 text-xl animate-bounce' : 'fa-circle-check text-emerald-600 text-xl'}`}></i>
+              <div>
+                <span className="font-bold">{totalPending > 0 ? `尚有 ${totalPending} 筆待審核項目` : '目前所有單據皆已審核完成'}</span>
+                <p className="text-xs opacity-80 mt-0.5">系統會自動追蹤紀錄並發送 LINE 通知提醒管理人員。</p>
+              </div>
+            </div>
+            {totalPending > 0 && (
+              <span className="text-xs font-semibold bg-amber-200 text-amber-900 px-3 py-1 rounded-full">
+                需即時處理
+              </span>
+            )}
+          </div>
+
+          {/* 請假/銷假待審核單據 */}
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <h3 className="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <i className="fa-solid fa-envelope-open-text text-amber-500"></i> 待審核請假/銷假單據
             </h3>
-            <div class="space-y-3">
+            <div className="space-y-3">
               {leaveRequests.filter(r => r.status === 'pending' || r.status === 'cancel_pending').length === 0 ? (
-                <p class="text-slate-400 text-sm text-center py-4">目前無待處理請假申請</p>
+                <p className="text-slate-400 text-sm text-center py-4">目前無待處理請假申請</p>
               ) : (
                 leaveRequests.filter(r => r.status === 'pending' || r.status === 'cancel_pending').map(req => (
-                  <div key={req.id} class="p-4 bg-slate-50 border border-slate-200 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                  <div key={req.id} className="p-4 bg-slate-50 border border-slate-200 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>
-                      <div class="flex items-center gap-2">
-                        <span class="font-bold text-slate-800">{req.userName}</span>
-                        <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{req.leaveType}</span>
-                        <span class="text-xs font-semibold text-slate-500">{req.hours} 小時</span>
-                        {req.status === 'cancel_pending' && <span class="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded font-bold">申請銷假中</span>}
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-800">{req.userName}</span>
+                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{req.leaveType}</span>
+                        <span className="text-xs font-semibold text-slate-500">{req.hours} 小時</span>
+                        {req.status === 'cancel_pending' && <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded font-bold">申請銷假中</span>}
                       </div>
-                      <p class="text-xs text-slate-500 mt-1">日期：{req.date} ({req.dayOfWeek}) {req.isFullDay ? '全日' : `${req.startTime}~${req.endTime}`}</p>
-                      {req.cancelReason && <p class="text-xs text-red-600 mt-1">銷假原因：{req.cancelReason}</p>}
+                      <p className="text-xs text-slate-500 mt-1">日期：{req.date} ({req.dayOfWeek}) {req.isFullDay ? '全日' : `${req.startTime}~${req.endTime}`}</p>
+                      {req.cancelReason && <p className="text-xs text-red-600 mt-1">銷假原因：{req.cancelReason}</p>}
                     </div>
-                    <div class="flex items-center gap-2 self-end md:self-auto">
-                      <button onClick={() => handleApproveLeave(req, req.status === 'cancel_pending')} class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-1.5 rounded">
-                        <i class="fa-solid fa-check mr-1"></i> 核准
+                    <div className="flex items-center gap-2 self-end md:self-auto">
+                      <button onClick={() => handleApproveLeave(req, req.status === 'cancel_pending')} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-1.5 rounded">
+                        <i className="fa-solid fa-check mr-1"></i> 核准
                       </button>
-                      <button onClick={() => setRejectModal({ type: 'leave', item: req })} class="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-3 py-1.5 rounded">
-                        <i class="fa-solid fa-xmark mr-1"></i> 駁回
+                      <button onClick={() => setRejectModal({ type: 'leave', item: req })} className="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-3 py-1.5 rounded">
+                        <i className="fa-solid fa-xmark mr-1"></i> 駁回
                       </button>
                     </div>
                   </div>
@@ -930,37 +1069,37 @@
             </div>
           </div>
 
-          <!-- 加班待審核單據 (預審與複審) -->
-          <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-            <h3 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <i class="fa-solid fa-business-time text-indigo-500"></i> 待審核加班單據 (兩階段)
+          {/* 加班待審核單據 (預審與複審) */}
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <h3 className="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <i className="fa-solid fa-business-time text-indigo-500"></i> 待審核加班單據 (兩階段)
             </h3>
-            <div class="space-y-3">
+            <div className="space-y-3">
               {overtimeRequests.filter(r => r.preApprovalStatus === 'pending' || r.finalApprovalStatus === 'pending').length === 0 ? (
-                <p class="text-slate-400 text-sm text-center py-4">目前無待處理加班申請</p>
+                <p className="text-slate-400 text-sm text-center py-4">目前無待處理加班申請</p>
               ) : (
                 overtimeRequests.filter(r => r.preApprovalStatus === 'pending' || r.finalApprovalStatus === 'pending').map(req => {
                   const isPre = req.preApprovalStatus === 'pending';
                   return (
-                    <div key={req.id} class="p-4 bg-slate-50 border border-slate-200 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div key={req.id} className="p-4 bg-slate-50 border border-slate-200 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                       <div>
-                        <div class="flex items-center gap-2">
-                          <span class="font-bold text-slate-800">{req.userName}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-800">{req.userName}</span>
                           <span className={`text-xs px-2 py-0.5 rounded font-semibold ${isPre ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
                             {isPre ? '第一階段 (預審)' : '第二階段 (複審)'}
                           </span>
                         </div>
-                        <p class="text-xs text-slate-500 mt-1">
+                        <p className="text-xs text-slate-500 mt-1">
                           日期：{req.date} ({req.dayOfWeek}) | 預計：{req.planStart}~{req.planEnd} ({req.planHours}h)
-                          {!isPre && <span class="text-slate-800 font-bold ml-2">實際下班：{req.actualClockOut} ({req.actualHours}h)</span>}
+                          {!isPre && <span className="text-slate-800 font-bold ml-2">實際下班：{req.actualClockOut} ({req.actualHours}h)</span>}
                         </p>
                       </div>
-                      <div class="flex items-center gap-2 self-end md:self-auto">
-                        <button onClick={() => handleApproveOvertime(req, isPre ? 'pre' : 'final')} class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-1.5 rounded">
-                          <i class="fa-solid fa-check mr-1"></i> 核准
+                      <div className="flex items-center gap-2 self-end md:self-auto">
+                        <button onClick={() => handleApproveOvertime(req, isPre ? 'pre' : 'final')} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-1.5 rounded">
+                          <i className="fa-solid fa-check mr-1"></i> 核准
                         </button>
-                        <button onClick={() => setRejectModal({ type: isPre ? 'ot_pre' : 'ot_final', item: req })} class="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-3 py-1.5 rounded">
-                          <i class="fa-solid fa-xmark mr-1"></i> 駁回
+                        <button onClick={() => setRejectModal({ type: isPre ? 'ot_pre' : 'ot_final', item: req })} className="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-3 py-1.5 rounded">
+                          <i className="fa-solid fa-xmark mr-1"></i> 駁回
                         </button>
                       </div>
                     </div>
@@ -970,18 +1109,18 @@
             </div>
           </div>
 
-          <!-- 駁回 Reason Modal -->
+          {/* 駁回 Reason Modal */}
           {rejectModal && (
-            <div class="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50">
-              <div class="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
-                <h4 class="font-bold text-slate-800 text-lg">退回/駁回申請</h4>
+            <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
+                <h4 className="font-bold text-slate-800 text-lg">退回/駁回申請</h4>
                 <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-1">請輸入駁回原因 (申請人可修改後重新送出)</label>
-                  <textarea rows="3" value={rejectionReason} onChange={e => setRejectionReason(e.target.value)} class="w-full px-3 py-2 border border-slate-300 rounded-lg" placeholder="說明駁回原因..."></textarea>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">請輸入駁回原因 (申請人可修改後重新送出)</label>
+                  <textarea rows="3" value={rejectionReason} onChange={e => setRejectionReason(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg" placeholder="說明駁回原因..."></textarea>
                 </div>
-                <div class="flex justify-end gap-2">
-                  <button onClick={() => setRejectModal(null)} class="px-4 py-2 border border-slate-300 rounded-lg text-slate-600">取消</button>
-                  <button onClick={handleRejectSubmit} class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">確定駁回</button>
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setRejectModal(null)} className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600">取消</button>
+                  <button onClick={handleRejectSubmit} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">確定駁回</button>
                 </div>
               </div>
             </div>
@@ -993,11 +1132,10 @@
     // =========================================================================
     // 8. 子頁面：管理者頁面 (打卡記錄上傳 + Excel 匯出) (功能 8, 9)
     // =========================================================================
-    function AdminView({ usersList, leaveRequests, overtimeRequests, clockLogs }) {
+    function AdminView({ usersList, leaveRequests, overtimeRequests, clockLogs, setClockLogs }) {
       const [selectedMonth, setSelectedMonth] = useState('2026-10');
       const [uploading, setUploading] = useState(false);
 
-      // 上傳當月打卡 Excel/CSV 紀錄
       const handleFileUpload = (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -1011,12 +1149,15 @@
             const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
             const jsonData = XLSX.utils.sheet_to_json(firstSheet);
 
-            // 上傳至 Firestore clock_logs
-            await db.collection('clock_logs').doc(selectedMonth).set({
-              month: selectedMonth,
-              logs: jsonData,
-              updatedAt: new Date().toISOString()
-            });
+            if (isFirebaseConfigured && db) {
+              await db.collection('clock_logs').doc(selectedMonth).set({
+                month: selectedMonth,
+                logs: jsonData,
+                updatedAt: new Date().toISOString()
+              });
+            } else {
+              setClockLogs([...clockLogs.filter(c => c.month !== selectedMonth), { month: selectedMonth, logs: jsonData }]);
+            }
 
             alert(`月份 ${selectedMonth} 的打卡紀錄匯入成功！共 ${jsonData.length} 筆`);
           } catch (err) {
@@ -1028,7 +1169,6 @@
         reader.readAsArrayBuffer(file);
       };
 
-      // 一鍵產生多 Tab Excel 報表
       const handleExportExcel = () => {
         const wb = XLSX.utils.book_new();
 
@@ -1061,7 +1201,7 @@
           const sheetRows = [];
           sheetRows.push({ A: `員工姓名: ${u.name}`, B: `職稱: ${u.title}`, C: `打卡機代號: ${u.clockId}` });
           sheetRows.push({ A: `結算特休時數: ${calculateAnnualLeaveHours(u.onboardDate)}`, B: `結算補休時數: ${u.compLeaveHours || 0}` });
-          sheetRows.push({}); // 空行
+          sheetRows.push({});
           sheetRows.push({ A: '日期', B: '假別/出勤項目', C: '時數', D: '狀態', E: '備註' });
 
           uLeaves.forEach(l => {
@@ -1072,44 +1212,42 @@
           });
 
           const userWs = XLSX.utils.json_to_sheet(sheetRows, { skipHeader: true });
-          // 分頁名稱: 打卡代號_姓名
-          const sheetName = `${u.clockId}_${u.name}`.substring(0, 31); // Excel 分頁最長 31 字元
+          const sheetName = `${u.clockId}_${u.name}`.substring(0, 31);
           XLSX.utils.book_append_sheet(wb, userWs, sheetName);
         });
 
-        // 匯出 .xlsx 檔案
         XLSX.writeFile(wb, `公司月度考勤結算表_${selectedMonth}.xlsx`);
       };
 
       return (
-        <div class="space-y-6">
-          <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-            <h3 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <i class="fa-solid fa-file-excel text-emerald-600"></i> 月份考勤上傳與報表產生
+        <div className="space-y-6">
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <h3 className="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <i className="fa-solid fa-file-excel text-emerald-600"></i> 月份考勤上傳與報表產生
             </h3>
             
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <!-- 左邊：上傳考勤紀錄 -->
-              <div class="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
-                <h4 class="font-bold text-slate-700 text-sm">1. 上傳當月打卡機紀錄</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* 左邊：上傳考勤紀錄 */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
+                <h4 className="font-bold text-slate-700 text-sm">1. 上傳當月打卡機紀錄</h4>
                 <div>
-                  <label class="block text-xs font-semibold text-slate-500 mb-1">選擇考勤月份</label>
-                  <input type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} class="px-3 py-1.5 border border-slate-300 rounded text-sm w-full" />
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">選擇考勤月份</label>
+                  <input type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="px-3 py-1.5 border border-slate-300 rounded text-sm w-full" />
                 </div>
                 <div>
-                  <label class="block text-xs font-semibold text-slate-500 mb-1">上傳 Excel/CSV 檔案 (需包含: 打卡代號、日期、簽到/簽退)</label>
-                  <input type="file" accept=".xlsx, .xls, .csv" onChange={handleFileUpload} disabled={uploading} class="text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">上傳 Excel/CSV 檔案 (需包含: 打卡代號、日期、簽到/簽退)</label>
+                  <input type="file" accept=".xlsx, .xls, .csv" onChange={handleFileUpload} disabled={uploading} className="text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
                 </div>
               </div>
 
-              <!-- 右邊：一鍵匯出 Excel -->
-              <div class="p-4 bg-blue-50 border border-blue-100 rounded-lg flex flex-col justify-between">
+              {/* 右邊：一鍵匯出 Excel */}
+              <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg flex flex-col justify-between">
                 <div>
-                  <h4 class="font-bold text-blue-900 text-sm">2. 產生當月 Excel 報表</h4>
-                  <p class="text-xs text-blue-700 mt-1">系統將根據考勤數據、核准之請假與加班紀錄，自動為每位使用者獨立製作 Excel 分頁，並算清剩餘特休與補休時數。</p>
+                  <h4 className="font-bold text-blue-900 text-sm">2. 產生當月 Excel 報表</h4>
+                  <p className="text-xs text-blue-700 mt-1">系統將根據考勤數據、核准之請假與加班紀錄，自動為每位使用者獨立製作 Excel 分頁，並算清剩餘特休與補休時數。</p>
                 </div>
-                <button onClick={handleExportExcel} class="mt-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-lg transition shadow flex items-center justify-center gap-2">
-                  <i class="fa-solid fa-download"></i> 一鍵匯出全公司 `.xlsx` 報表
+                <button onClick={handleExportExcel} className="mt-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-lg transition shadow flex items-center justify-center gap-2">
+                  <i className="fa-solid fa-download"></i> 一鍵匯出全公司 `.xlsx` 報表
                 </button>
               </div>
             </div>
@@ -1128,10 +1266,9 @@
         cancelled: { label: '已銷假', class: 'bg-slate-200 text-slate-700' }
       };
       const conf = config[status] || { label: status, class: 'bg-slate-100 text-slate-800' };
-      return <span class={`text-xs font-semibold px-2 py-0.5 rounded ${conf.class}`}>{conf.label}</span>;
+      return <span className={`text-xs font-semibold px-2 py-0.5 rounded ${conf.class}`}>{conf.label}</span>;
     }
 
-    // 渲染 React App
     ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   </script>
 </body>
