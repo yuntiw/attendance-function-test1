@@ -55,10 +55,6 @@
       console.warn("Firebase 初始化異常，使用本地展示模式。");
     }
 
-    function sendLineAdminNotification(title, content) {
-      console.log(`[LINE 推播通知] ${title}: ${content}`);
-    }
-
     function getDayOfWeekStr(dateStr) {
       if (!dateStr) return '';
       const days = ['日', '一', '二', '三', '四', '五', '六'];
@@ -143,46 +139,12 @@
           password: 'Aa123456', 
           role: 'admin', 
           delegatedScopes: { leave: true, overtime: true, outing: true }
-        },
-        { 
-          id: 'delegated_1', 
-          name: '陳經理', 
-          title: '部門主管', 
-          gender: 'female', 
-          onboardDate: '2021-06-15', 
-          clockId: 'C1002', 
-          password: '123', 
-          role: 'delegated_admin', 
-          delegatedScopes: { leave: true, overtime: true, outing: false },
-          compLeaveHours: 12 
-        },
-        { 
-          id: 'staff_1', 
-          name: '王小明', 
-          title: '高級專員', 
-          gender: 'male', 
-          onboardDate: '2023-02-10', 
-          clockId: 'C1003', 
-          password: '123', 
-          role: 'staff', 
-          delegatedScopes: { leave: false, overtime: false, outing: false },
-          compLeaveHours: 8 
         }
       ]);
 
-      const [leaveRequests, setLeaveRequests] = useState([
-        { id: 'leave_101', userId: 'staff_1', userName: '王小明', date: '2026-10-02', dayOfWeek: '星期五', startTime: '09:00', endTime: '18:00', isFullDay: true, leaveType: '特休', hours: 8, status: 'approved', rejectionReason: '', cancelReason: '', approverName: '系統管理員', createdAt: '2026-10-01T08:00:00.000Z' },
-        { id: 'leave_102', userId: 'staff_1', userName: '王小明', date: '2026-10-09', dayOfWeek: '星期五', startTime: '09:00', endTime: '18:00', isFullDay: true, leaveType: '事假', hours: 8, status: 'pending', rejectionReason: '', cancelReason: '', approverName: '', createdAt: '2026-10-08T08:00:00.000Z' }
-      ]);
-
-      const [overtimeRequests, setOvertimeRequests] = useState([
-        { id: 'ot_101', userId: 'staff_1', userName: '王小明', date: '2026-10-05', dayOfWeek: '星期一', planStart: '18:00', planEnd: '20:00', planHours: 2, reason: '專案緊急上線', preApprovalStatus: 'approved', preApproverName: '陳經理', actualClockOut: '20:30', actualHours: 2.5, finalApprovalStatus: 'approved', finalApproverName: '系統管理員', rejectionReason: '', createdAt: '2026-10-04T16:00:00.000Z' }
-      ]);
-
-      const [outingRequests, setOutingRequests] = useState([
-        { id: 'out_101', userId: 'staff_1', userName: '王小明', date: '2026-10-07', dayOfWeek: '星期三', startTime: '14:00', endTime: '16:00', hours: 2, reason: '至國泰世華銀行辦理公司戶頭開戶', status: 'approved', rejectionReason: '', approverName: '陳經理', createdAt: '2026-10-06T09:00:00.000Z' }
-      ]);
-
+      const [leaveRequests, setLeaveRequests] = useState([]);
+      const [overtimeRequests, setOvertimeRequests] = useState([]);
+      const [outingRequests, setOutingRequests] = useState([]);
       const [clockLogs, setClockLogs] = useState([]);
 
       const triggerToast = (msg) => {
@@ -365,7 +327,6 @@
                   <i className="fa-solid fa-right-to-bracket"></i> 登入考勤系統
                 </button>
               </form>
-
             </div>
           </div>
         );
@@ -728,7 +689,6 @@
         };
 
         setLeaveRequests([newReq, ...leaveRequests]);
-        sendLineAdminNotification("新請假申請", `${userProfile.name} 申請 ${date} ${leaveType} (${calculatedHours}小時)`);
         triggerToast("請假申請已成功送出！");
       };
 
@@ -909,7 +869,6 @@
         };
 
         setOvertimeRequests([newOt, ...overtimeRequests]);
-        sendLineAdminNotification("新加班預先申請", `${userProfile.name} 申請 ${date} 加班 ${planHours}小時`);
         triggerToast("加班預先申請已送出！");
       };
 
@@ -1080,7 +1039,6 @@
         };
 
         setOutingRequests([newReq, ...outingRequests]);
-        sendLineAdminNotification("新外出申請", `${userProfile.name} 申請 ${date} 外出 ${calculatedHours}小時`);
         triggerToast("外出申請已送出！");
       };
 
@@ -1760,17 +1718,8 @@
       const [anomalies, setAnomalies] = useState([]);
       const [uploadedRawData, setUploadedRawData] = useState([]);
 
-      const demoLogs = useMemo(() => [
-        { clockId: 'C1003', userName: '王小明', date: '2026-10-02', time: '09:20', type: '簽到' },
-        { clockId: 'C1003', userName: '王小明', date: '2026-10-02', time: '18:05', type: '簽退' },
-        { clockId: 'C1002', userName: '陳經理', date: '2026-10-06', time: '09:05', type: '簽到' },
-        { clockId: 'C1002', userName: '陳經理', date: '2026-10-06', time: '13:00', type: '簽到' },
-        { clockId: 'C1002', userName: '陳經理', date: '2026-10-06', time: '20:15', type: '簽退' },
-        { clockId: 'C1003', userName: '王小明', date: '2026-10-10', time: '10:00', type: '簽到' },
-      ], []);
-
       const runAnomalyDetection = (rawLogs) => {
-        const activeLogs = rawLogs && rawLogs.length > 0 ? rawLogs : demoLogs;
+        const activeLogs = rawLogs && rawLogs.length > 0 ? rawLogs : [];
         const results = [];
 
         const targetUsers = usersList.filter(u => u.role !== 'admin');
@@ -1908,7 +1857,7 @@
         const summaryWs = XLSX.utils.json_to_sheet(summaryData);
         XLSX.utils.book_append_sheet(wb, summaryWs, "全公司統計總表");
 
-        const rawPunches = uploadedRawData.length > 0 ? uploadedRawData : demoLogs;
+        const rawPunches = uploadedRawData;
         const rawWs = XLSX.utils.json_to_sheet(rawPunches);
         XLSX.utils.book_append_sheet(wb, rawWs, "打卡機原始紀錄");
 
