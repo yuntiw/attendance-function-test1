@@ -41,7 +41,6 @@
 
     let auth = null;
     let db = null;
-    let isFirebaseConfigured = false;
 
     try {
       if (firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY") {
@@ -50,7 +49,6 @@
         }
         auth = firebase.auth();
         db = firebase.firestore();
-        isFirebaseConfigured = true;
       }
     } catch (e) {
       console.warn("Firebase 初始化異常，使用本地展示模式。");
@@ -328,13 +326,6 @@
 
       return (
         <div className="min-h-screen flex flex-col relative">
-          {toastMessage && (
-            <div className="fixed top-5 right-5 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-xl flex items-center gap-2 text-xs font-bold animate-bounce">
-              <i className="fa-solid fa-circle-check text-emerald-400 text-base"></i>
-              <span>{toastMessage}</span>
-            </div>
-          )}
-
           <div className="bg-slate-900 text-white shadow-md">
             <div className="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
               <div className="flex items-center space-x-3">
@@ -445,6 +436,13 @@
             {activeTab === 'employee_management' && userProfile.role === 'admin' && <EmployeeManagementView usersList={usersList} setUsersList={setUsersList} holidaysList={holidaysList} setHolidaysList={setHolidaysList} triggerToast={triggerToast} />}
             {activeTab === 'admin_reports' && (userProfile.role === 'admin' || userProfile.role === 'delegated_admin') && <AdminReportsView userProfile={userProfile} usersList={usersList} leaveRequests={leaveRequests} overtimeRequests={overtimeRequests} outingRequests={outingRequests} holidaysList={holidaysList} clockLogs={clockLogs} setClockLogs={setClockLogs} />}
           </main>
+
+          {toastMessage && (
+            <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-xl flex items-center gap-2 text-xs font-bold animate-pulse">
+              <i className="fa-solid fa-circle-check text-emerald-400 text-base"></i>
+              <span>{toastMessage}</span>
+            </div>
+          )}
         </div>
       );
     }
@@ -454,7 +452,7 @@
       return (
         <button onClick={() => setActiveTab(id)} className={`flex items-center gap-2 py-3.5 px-1 border-b-2 font-bold text-sm whitespace-nowrap transition-colors relative ${active ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'}`}>
           <i className={`fa-solid ${icon}`}></i> {label}
-          {badgeCount > 0 && <span className="ml-1 px-2 py-0.5 text-xs font-black bg-red-500 text-white rounded-full animate-pulse">{badgeCount}</span>}
+          {badgeCount > 0 && <span className="ml-1 px-2 py-0.5 text-xs font-black bg-red-500 text-white rounded-full">{badgeCount}</span>}
         </button>
       );
     }
