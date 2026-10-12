@@ -20,6 +20,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen">
   <div id="root"></div>
@@ -27,18 +28,17 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo } = React;
 
-    // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-const firebaseConfig = {
-  apiKey: "AIzaSyBXP4CNwWs905l7FG4lHMR1CsmZJJAv660",
-  authDomain: "attendance-function-test1.firebaseapp.com",
-  databaseURL: "https://attendance-function-test1-default-rtdb.firebaseio.com",
-  projectId: "attendance-function-test1",
-  storageBucket: "attendance-function-test1.firebasestorage.app",
-  messagingSenderId: "276967647153",
-  appId: "1:276967647153:web:6845f5fd391a26e0f63f90",
-  measurementId: "G-0KF2L00BJK"
-};
-    
+    const firebaseConfig = {
+      apiKey: "AIzaSyBXP4CNwWs905l7FG4lHMR1CsmZJJAv660",
+      authDomain: "attendance-function-test1.firebaseapp.com",
+      databaseURL: "https://attendance-function-test1-default-rtdb.firebaseio.com",
+      projectId: "attendance-function-test1",
+      storageBucket: "attendance-function-test1.firebasestorage.app",
+      messagingSenderId: "276967647153",
+      appId: "1:276967647153:web:6845f5fd391a26e0f63f90",
+      measurementId: "G-0KF2L00BJK"
+    };
+
     let auth = null;
     let db = null;
     let isFirebaseConfigured = false;
@@ -127,22 +127,52 @@ const firebaseConfig = {
 
       const [loginClockId, setLoginClockId] = useState('');
       const [loginPassword, setLoginPassword] = useState('');
+      const [showLoginPassword, setShowLoginPassword] = useState(false);
       const [loginError, setLoginError] = useState('');
       const [toastMessage, setToastMessage] = useState(null);
-const [showLoginPassword, setShowLoginPassword] = useState(false);
       const [isFirebaseConnected, setIsFirebaseConnected] = useState(false);
-      const [usersList, setUsersList] = useState([
-        { 
-          id: 'admin_1', 
-          clockId: 'TASO00', 
-          name: 'TEST', 
-          title: '執行長／團長',
-          gender: 'male', 
-          password: 'Aa123456', 
-          role: 'admin', 
-          delegatedScopes: { leave: true, overtime: true, outing: true }
+
+      const [usersList, setUsersList] = useState(() => {
+        const saved = localStorage.getItem('taso_users_list');
+        if (saved) {
+          try {
+            return JSON.parse(saved);
+          } catch (e) {
+            console.error("解析儲存的員工資料失敗", e);
+          }
         }
-      ]);
+        return [
+          { 
+            id: 'admin_1', 
+            clockId: 'TASO00', 
+            name: 'TEST', 
+            title: '執行長／團長',
+            gender: 'male', 
+            password: 'Aa123456', 
+            role: 'admin', 
+            delegatedScopes: { leave: true, overtime: true, outing: true }
+          }
+        ];
+      });
+
+      useEffect(() => {
+        localStorage.setItem('taso_users_list', JSON.stringify(usersList));
+      }, [usersList]);
+
+      useEffect(() => {
+        if (isFirebaseConfigured && db) {
+          const connectedRef = firebase.database().ref(".info/connected");
+          connectedRef.on("value", (snap) => {
+            if (snap.val() === true) {
+              setIsFirebaseConnected(true);
+            } else {
+              setIsFirebaseConnected(false);
+            }
+          });
+        } else {
+          setIsFirebaseConnected(false);
+        }
+      }, []);
 
       const [leaveRequests, setLeaveRequests] = useState([]);
       const [overtimeRequests, setOvertimeRequests] = useState([]);
@@ -155,20 +185,18 @@ const [showLoginPassword, setShowLoginPassword] = useState(false);
       };
 
       useEffect(() => {
-  if (isFirebaseConfigured && db) {
-    // 透過 Firebase Realtime Database 監聽連線狀態
-    const connectedRef = firebase.database().ref(".info/connected");
-    connectedRef.on("value", (snap) => {
-      if (snap.val() === true) {
-        setIsFirebaseConnected(true);
-      } else {
-        setIsFirebaseConnected(false);
-      }
-    });
-  } else {
-    setIsFirebaseConnected(false);
-  }
-}, []);
+        const savedClockId = localStorage.getItem('taso_login_clockId');
+        if (savedClockId) {
+          const matched = usersList.find(u => u.clockId === savedClockId);
+          if (matched) {
+            setCurrentUser(matched);
+            setUserProfile(matched);
+            setActiveTab('profile');
+          }
+        }
+        setLoading(false);
+      }, [usersList]);
+
       const monthlyStats = useMemo(() => {
         if (!userProfile) return { leaveHours: 0, otHours: 0, annualRemaining: 0, annualTotal: 0 };
         const currentMonthPrefix = new Date().toISOString().substring(0, 7);
@@ -315,14 +343,23 @@ const [showLoginPassword, setShowLoginPassword] = useState(false);
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">登入密碼</label>
-                  <input 
-                    type="password" 
-                    required 
-                    placeholder="請輸入密碼" 
-                    value={loginPassword} 
-                    onChange={e => setLoginPassword(e.target.value)} 
-                    className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none text-slate-800"
-                  />
+                  <div className="relative">
+                    <input 
+                      type={showLoginPassword ? "text" : "password"} 
+                      required 
+                      placeholder="請輸入密碼" 
+                      value={loginPassword} 
+                      onChange={e => setLoginPassword(e.target.value)} 
+                      className="w-full px-4 py-2.5 pr-12 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none text-slate-800"
+                    />
+                    <button 
+                      type="button"
+                      onClick={() => setShowLoginPassword(!showLoginPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 px-2 py-1"
+                    >
+                      <i className={`fa-solid ${showLoginPassword ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                    </button>
+                  </div>
                 </div>
                 <button 
                   type="submit" 
@@ -338,24 +375,26 @@ const [showLoginPassword, setShowLoginPassword] = useState(false);
 
       return (
         <div className="min-h-screen flex flex-col relative">
+          <div className={`text-xs px-4 py-1.5 text-center font-bold flex items-center justify-center gap-2 transition-colors ${
+            isFirebaseConfigured && isFirebaseConnected 
+              ? 'bg-emerald-600 text-white' 
+              : 'bg-amber-500 text-slate-900'
+          }`}>
+            <i className={`fa-solid ${isFirebaseConfigured && isFirebaseConnected ? 'fa-cloud-arrow-up' : 'fa-triangle-exclamation'}`}></i>
+            <span>
+              {isFirebaseConfigured && isFirebaseConnected 
+                ? 'Firebase 資料庫連線正常 (即時同步中)' 
+                : '目前處於本地展示模式 / 未連線至 Firebase (資料僅存於暫存記憶體)'}
+            </span>
+          </div>
+
           {toastMessage && (
             <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl border border-slate-700 flex items-center gap-3 animate-bounce">
               <i className="fa-solid fa-circle-check text-emerald-400 text-lg"></i>
               <span className="text-sm font-bold">{toastMessage}</span>
             </div>
-<div className={`text-xs px-4 py-1.5 text-center font-bold flex items-center justify-center gap-2 transition-colors ${
-  isFirebaseConfigured && isFirebaseConnected 
-    ? 'bg-emerald-600 text-white' 
-    : 'bg-amber-500 text-slate-900'
-}`}>
-  <i className={`fa-solid ${isFirebaseConfigured && isFirebaseConnected ? 'fa-cloud-arrow-up' : 'fa-triangle-exclamation'}`}></i>
-  <span>
-    {isFirebaseConfigured && isFirebaseConnected 
-      ? 'Firebase 資料庫連線正常 (即時同步中)' 
-      : '目前處於本地展示模式 / 未連線至 Firebase (資料僅存於暫存記憶體)'}
-  </span>
-</div>
-                  )}
+          )}
+
           <header className="bg-slate-900 text-white shadow-md">
             <div className="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
               <div className="flex items-center space-x-3">
@@ -1535,6 +1574,13 @@ const [showLoginPassword, setShowLoginPassword] = useState(false);
         triggerToast("已修改該員工之資料與授權範疇！");
       };
 
+      const handleDeleteUser = (userId, userName) => {
+        if (confirm(`確定要刪除員工「${userName}」的帳號嗎？`)) {
+          setUsersList(usersList.filter(u => u.id !== userId));
+          triggerToast(`已成功刪除員工帳號：${userName}`);
+        }
+      };
+
       return (
         <div className="space-y-6">
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
@@ -1626,6 +1672,11 @@ const [showLoginPassword, setShowLoginPassword] = useState(false);
                         <button onClick={() => setEditingUser({ ...u })} className="text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1 rounded-lg font-bold">
                           編輯/授權設定
                         </button>
+                        {u.clockId !== 'TASO00' && (
+                          <button onClick={() => handleDeleteUser(u.id, u.name)} className="text-xs bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1 rounded-lg font-bold ml-1">
+                            刪除
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -1677,10 +1728,11 @@ const [showLoginPassword, setShowLoginPassword] = useState(false);
                   {editingUser.role === 'delegated_admin' && (
                     <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 space-y-2">
                       <label className="block text-xs font-bold text-amber-900 mb-1">設定授權管理員可審核的範疇：</label>
-                      <div className="flex flex-col gap-1.5 text-xs font-bold text-slate-700">
-                        <label className="flex items-center gap-2 cursor-pointer">
+                      <div className="flex flex-col gap-2 text-xs font-bold text-slate-700">
+                        <label className="flex items-center gap-3 p-2 bg-white rounded-lg border border-amber-200 cursor-pointer active:bg-amber-100">
                           <input 
                             type="checkbox" 
+                            className="w-5 h-5 text-blue-600 rounded"
                             checked={editingUser.delegatedScopes?.leave ?? true} 
                             onChange={e => setEditingUser({ 
                               ...editingUser, 
@@ -1689,9 +1741,10 @@ const [showLoginPassword, setShowLoginPassword] = useState(false);
                           />
                           <span>請假審核權限</span>
                         </label>
-                        <label className="flex items-center gap-2 cursor-pointer">
+                        <label className="flex items-center gap-3 p-2 bg-white rounded-lg border border-amber-200 cursor-pointer active:bg-amber-100">
                           <input 
                             type="checkbox" 
+                            className="w-5 h-5 text-blue-600 rounded"
                             checked={editingUser.delegatedScopes?.overtime ?? true} 
                             onChange={e => setEditingUser({ 
                               ...editingUser, 
@@ -1700,9 +1753,10 @@ const [showLoginPassword, setShowLoginPassword] = useState(false);
                           />
                           <span>加班審核權限</span>
                         </label>
-                        <label className="flex items-center gap-2 cursor-pointer">
+                        <label className="flex items-center gap-3 p-2 bg-white rounded-lg border border-amber-200 cursor-pointer active:bg-amber-100">
                           <input 
                             type="checkbox" 
+                            className="w-5 h-5 text-blue-600 rounded"
                             checked={editingUser.delegatedScopes?.outing ?? true} 
                             onChange={e => setEditingUser({ 
                               ...editingUser, 
